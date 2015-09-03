@@ -15,7 +15,7 @@ git checkout -b release || true
 echo "version = '${VERSION}'" > src/version.py
 
 
-docker-build randyp/svg-to-dxf:${VERSION}
+docker-build randyp/svg-to-dxf ${VERSION}
 ./push
 
 
