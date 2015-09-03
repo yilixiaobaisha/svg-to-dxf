@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import print_function, division
 import pysvg.parser
 from pysvg.core import TextContent
 import pysvg.structure as structure
@@ -112,10 +112,13 @@ def _convert_circle_to_path(element):
     return aspath
 
 
+def _point_on_arc(theta, c, r):
+    return complex(math.cos(math.radians(theta)) * r.real + c.real, math.sin(math.radians(theta)) * r.imag + c.imag)
+
+
 def __append_path_to_dxf(element, msp, debug, transform):
     parsed = path.parser.parse_path(element.get_d())
     for segment in parsed:
-        debug(segment)
         if isinstance(segment, path.Line):
             start = _complex_to_2tuple(segment.start, transform)
             end = _complex_to_2tuple(segment.end, transform)
@@ -139,6 +142,27 @@ def __append_path_to_dxf(element, msp, debug, transform):
             spline = msp.add_spline()
             spline.set_control_points((start, control1, control2, end))
             spline.set_knot_values((0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0))
+
+        elif isinstance(segment, path.Arc):
+            num_segments = int(math.ceil(math.fabs(segment.delta) / 30.0))
+            delta_segment_inc = segment.delta / num_segments
+
+            def point_on_arc(theta):
+                return _point_on_arc(theta, segment.center, segment.radius)
+
+            for segment_index in range(0, num_segments):
+                segment_mults = [segment_index, segment_index + 1 / 3, segment_index + 2 / 3, segment_index + 1]
+                segment_angles = [segment.theta + delta_segment_inc * x for x in
+                                  segment_mults]
+                fit_points = [_complex_to_3tuple(point_on_arc(a), transform) for a in segment_angles]
+                if segment_index == 0:
+                    fit_points[0] = _complex_to_3tuple(segment.start, transform)
+
+                if segment == num_segments - 1:
+                    fit_points[-1] = _complex_to_3tuple(segment.end, transform)
+
+                # msp.add_spline(fit_points=fit_points)
+                msp.add_lwpolyline(points=fit_points)  # todo use splines
 
         else:
             debug(segment)
@@ -190,15 +214,36 @@ def _append_subelements(element, msp, debug, transform):
         _convert_element(e, msp, debug, transform)
 
 
-def convert(svg_in, dxf_out, debug_out=None):
-    svg = pysvg.parser.parse(svg_in)
-    dwg = ezdxf.new('AC1027')
-    msp = dwg.modelspace()
+__units = {
+    "unitless": 0,
+    "in": 1,
+    "ft": 2,
+    "mi": 3,
+    "mm": 4,
 
+}
+
+
+def convert(svg_in, dxf_out, debug_out=None):
     if debug_out is not None:
         debug = lambda *objects: print(*objects, file=debug_out)
     else:
         debug = _noop
+
+    svg = pysvg.parser.parse(svg_in)
+    dwg = ezdxf.new('AC1027')
+
+    # if "viewBox" in svg._attributes:
+    #     viewbox = [float(s) for s in svg.get_viewBox().split(" ") if s.strip()]
+    #     if len(viewbox) == 4:
+    #         dwg.header["$EXTMIN"] = (viewbox[0], viewbox[1], 0)
+    #         dwg.header["$EXTMAX"] = (viewbox[0] + viewbox[2], viewbox[1] + viewbox[3], 0)
+
+    # if "width" in svg._attributes:
+    #     pass
+    # 
+    # dwg.header['$INSUNITS'] = __units['mm']
+    msp = dwg.modelspace()
 
     _append_subelements(svg, msp, debug, x.matrix(1, 0, 0, -1, 0, 0))
 
