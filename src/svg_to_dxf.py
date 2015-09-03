@@ -116,28 +116,29 @@ def _point_on_arc(theta, c, r):
     return complex(math.cos(math.radians(theta)) * r.real + c.real, math.sin(math.radians(theta)) * r.imag + c.imag)
 
 
-def __append_path_to_dxf(element, msp, debug, transform):
+def __append_path_to_dxf(element, msp, debug, context):
     parsed = path.parser.parse_path(element.get_d())
+
     for segment in parsed:
         if isinstance(segment, path.Line):
-            start = _complex_to_2tuple(segment.start, transform)
-            end = _complex_to_2tuple(segment.end, transform)
+            start = _complex_to_2tuple(segment.start, context.transform)
+            end = _complex_to_2tuple(segment.end, context.transform)
             msp.add_line(start=start, end=end)
 
         elif isinstance(segment, path.QuadraticBezier):
-            start = _complex_to_3tuple(segment.start, transform)
-            control = _complex_to_3tuple(segment.control, transform)
-            end = _complex_to_3tuple(segment.end, transform)
+            start = _complex_to_3tuple(segment.start, context.transform)
+            control = _complex_to_3tuple(segment.control, context.transform)
+            end = _complex_to_3tuple(segment.end, context.transform)
 
             spline = msp.add_spline()
             spline.set_control_points((start, control, control, end))
             spline.set_knot_values((0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0))
 
         elif isinstance(segment, path.CubicBezier):
-            start = _complex_to_3tuple(segment.start, transform)
-            control1 = _complex_to_3tuple(segment.control1, transform)
-            control2 = _complex_to_3tuple(segment.control2, transform)
-            end = _complex_to_3tuple(segment.end, transform)
+            start = _complex_to_3tuple(segment.start, context.transform)
+            control1 = _complex_to_3tuple(segment.control1, context.transform)
+            control2 = _complex_to_3tuple(segment.control2, context.transform)
+            end = _complex_to_3tuple(segment.end, context.transform)
 
             spline = msp.add_spline()
             spline.set_control_points((start, control1, control2, end))
@@ -154,12 +155,12 @@ def __append_path_to_dxf(element, msp, debug, transform):
                 segment_mults = [segment_index, segment_index + 1 / 3, segment_index + 2 / 3, segment_index + 1]
                 segment_angles = [segment.theta + delta_segment_inc * x for x in
                                   segment_mults]
-                fit_points = [_complex_to_3tuple(point_on_arc(a), transform) for a in segment_angles]
+                fit_points = [_complex_to_3tuple(point_on_arc(a), context.transform) for a in segment_angles]
                 if segment_index == 0:
-                    fit_points[0] = _complex_to_3tuple(segment.start, transform)
+                    fit_points[0] = _complex_to_3tuple(segment.start, context.transform)
 
                 if segment == num_segments - 1:
-                    fit_points[-1] = _complex_to_3tuple(segment.end, transform)
+                    fit_points[-1] = _complex_to_3tuple(segment.end, context.transform)
 
                 # msp.add_spline(fit_points=fit_points)
                 msp.add_lwpolyline(points=fit_points)  # todo use splines
@@ -168,39 +169,36 @@ def __append_path_to_dxf(element, msp, debug, transform):
             debug(segment)
 
 
-def _convert_element(element, msp, debug, transform):
-    if hasattr(element, 'get_transform') and element.get_transform():
-        transform = transform.mult(x.parse(element.get_transform()))
-
+def _append_element(element, msp, debug, context):
     if isinstance(element, structure.G):
-        _append_subelements(element, msp, debug, transform)
+        _append_subelements(element, msp, debug, context.element(element))
 
     elif isinstance(element, shape.Path):
-        __append_path_to_dxf(element, msp, debug, transform)
+        __append_path_to_dxf(element, msp, debug, context)
 
     elif isinstance(element, shape.Line):
         aspath = _convert_line_to_path(element)
-        __append_path_to_dxf(aspath, msp, debug, transform)
+        __append_path_to_dxf(aspath, msp, debug, context)
 
     elif isinstance(element, shape.Rect):
         aspath = _convert_rect_to_path(element)
-        __append_path_to_dxf(aspath, msp, debug, transform)
+        __append_path_to_dxf(aspath, msp, debug, context)
 
     elif isinstance(element, shape.Polygon):
         aspath = _convert_polygon_to_path(element)
-        __append_path_to_dxf(aspath, msp, debug, transform)
+        __append_path_to_dxf(aspath, msp, debug, context)
 
     elif isinstance(element, shape.Polyline):
         aspath = _convert_polyline_to_path(element)
-        __append_path_to_dxf(aspath, msp, debug, transform)
+        __append_path_to_dxf(aspath, msp, debug, context)
 
     elif isinstance(element, shape.Circle):
         aspath = _convert_circle_to_path(element)
-        __append_path_to_dxf(aspath, msp, debug, transform)
+        __append_path_to_dxf(aspath, msp, debug, context)
 
     elif isinstance(element, shape.Ellipse):
         aspath = _convert_ellipse_to_path(element)
-        __append_path_to_dxf(aspath, msp, debug, transform)
+        __append_path_to_dxf(aspath, msp, debug, context)
 
     elif isinstance(element, TextContent):
         pass
@@ -209,9 +207,9 @@ def _convert_element(element, msp, debug, transform):
         debug(element)
 
 
-def _append_subelements(element, msp, debug, transform):
+def _append_subelements(element, msp, debug, context):
     for e in element.getAllElements():
-        _convert_element(e, msp, debug, transform)
+        _append_element(e, msp, debug, context)
 
 
 __units = {
@@ -222,6 +220,45 @@ __units = {
     "mm": 4,
 
 }
+
+
+class StyleToLayer(object):
+    def __init__(self, dwg):
+        self.dwg = dwg
+        self.layers = {
+            'default': dwg.layers.create(name='MyLines', dxfattribs={})
+        }
+
+    def resolve_layer(self, style):
+        return self.layers['default']
+
+
+class ElementContext(object):
+    def __init__(self, transform=x.IDENTITY, styles=(), style_to_layer=None):
+        if style_to_layer is None:
+            raise Exception("style_to_layer is required")
+
+        self.transform = transform
+        self.styles = styles
+        self.style_to_layer = style_to_layer
+
+    def element(self, element):
+        transform = self.transform
+        if hasattr(element, 'get_transform') and element.get_transform():
+            transform = transform.mult(x.parse(element.get_transform()))
+
+        styles = self.styles
+        if hasattr(element, 'get_style') and element.get_style():
+            pass
+
+        return ElementContext(transform, styles, self.style_to_layer)
+
+    def resolve_style(self):
+        return 'a'
+
+    def layer(self):
+        style = self.resolve_style()
+        return self.style_to_layer.resolve_layer(style)
 
 
 def convert(svg_in, dxf_out, debug_out=None):
@@ -243,8 +280,9 @@ def convert(svg_in, dxf_out, debug_out=None):
     #     pass
     # 
     # dwg.header['$INSUNITS'] = __units['mm']
-    msp = dwg.modelspace()
 
-    _append_subelements(svg, msp, debug, x.matrix(1, 0, 0, -1, 0, 0))
+    msp = dwg.modelspace()
+    context = ElementContext(transform=x.matrix(1, 0, 0, -1, 0, 0), style_to_layer=StyleToLayer(dwg)).element(svg)
+    _append_subelements(svg, msp, debug, context)
 
     dwg.write(dxf_out)
