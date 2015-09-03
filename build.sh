@@ -12,7 +12,6 @@ fi
 git reset --hard HEAD && git checkout master && git pull
 git branch -D release || true
 git checkout -b release || true
-git pull
 echo "version = '${VERSION}'" > src/version.py
 
 
