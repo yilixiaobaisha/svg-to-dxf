@@ -10,6 +10,9 @@ urls = (
 
 
 class convert_svg(object):
+    def GET(self):
+        return api_version
+
     def POST(self):
         try:
             svg = web.data()
