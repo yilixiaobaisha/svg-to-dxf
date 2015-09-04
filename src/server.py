@@ -11,9 +11,11 @@ urls = (
 
 class convert_svg(object):
     def GET(self):
+        web.header("Access-Control-Allow-Origin", "*")
         return api_version
 
     def POST(self):
+        web.header("Access-Control-Allow-Origin", "*")
         try:
             svg = web.data()
 
@@ -21,10 +23,12 @@ class convert_svg(object):
                 svg_in = StringIO.StringIO(svg)
                 dxf_out = StringIO.StringIO()
                 std_convert(svg_in, dxf_out, None)
+                web.header("Content-Type", "application/dxf")
+                web.header("Service-Version", api_version)
+                return dxf_out.getvalue()
+            else:
+                return ""
 
-            web.header("Content-Type", "application/dxf")
-            web.header("Service-Version", api_version)
-            return dxf_out.getvalue()
         except Exception, e:
             return web.internalerror(str(e))
 
