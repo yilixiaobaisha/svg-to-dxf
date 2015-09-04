@@ -1,4 +1,5 @@
 from __future__ import print_function
+import sys
 import web
 import StringIO
 from version import version as api_version
@@ -30,6 +31,7 @@ class convert_svg(object):
                 return ""
 
         except Exception, e:
+            print(str(e), file=sys.stderr)
             return web.internalerror(str(e))
 
 
