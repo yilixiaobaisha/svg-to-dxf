@@ -12,11 +12,9 @@ urls = (
 
 class convert_svg(object):
     def GET(self):
-        web.header("Access-Control-Allow-Origin", "*")
         return api_version
 
     def POST(self):
-        web.header("Access-Control-Allow-Origin", "*")
         try:
             svg = web.data()
 
