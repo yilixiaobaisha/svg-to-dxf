@@ -19,5 +19,5 @@ docker-build randyp/svg-to-dxf ${VERSION}
 ./push
 
 
-git commit -am 'version' && git tag -a "${VERSION}" -m "${VERSION}" && git push && git push --tags
+git commit -am 'version' && git tag -a "${VERSION}" -m "${VERSION}" && git checkout master && git push --tags
 
