@@ -26,7 +26,7 @@ class convert_svg(object):
             web.header("Service-Version", api_version)
             return dxf_out.getvalue()
         except Exception, e:
-            print(e)
+            return web.internalerror(str(e))
 
 
 if __name__ == "__main__":
