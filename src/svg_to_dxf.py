@@ -1,24 +1,42 @@
 from __future__ import print_function, division
+import math
+from contextlib import contextmanager
+import sys
+import os
+
 import pysvg.parser
 from pysvg.core import TextContent
 import pysvg.structure as structure
 import pysvg.shape as shape
 import svg.path as path
 import ezdxf
-import transform as x
-import math
+
+import transform as transform
+import colortrans
+
+
+@contextmanager
+def stdout_ignore():
+    old_stdout = sys.stdout
+    sys.stdout = open(os.devnull, "w")
+    try:
+        yield
+    finally:
+        sys.stdout.close()
+        sys.stdout = old_stdout
+
 
 # noinspection PyUnusedLocal
 def _noop(*args, **kwargs):
     pass
 
 
-def _complex_to_2tuple(c, transform=x.IDENTITY):
-    return transform.mult_point((c.real, c.imag))
+def _complex_to_2tuple(c, transform_=transform.IDENTITY):
+    return transform_.mult_point((c.real, c.imag))
 
 
-def _complex_to_3tuple(c, transform=x.IDENTITY):
-    return transform.mult_point((c.real, c.imag, 0))
+def _complex_to_3tuple(c, transform_=transform.IDENTITY):
+    return transform_.mult_point((c.real, c.imag, 0))
 
 
 def _convert_line_to_path(line):
@@ -123,7 +141,8 @@ def __append_path_to_dxf(element, msp, debug, context):
         if isinstance(segment, path.Line):
             start = _complex_to_2tuple(segment.start, context.transform)
             end = _complex_to_2tuple(segment.end, context.transform)
-            msp.add_line(start=start, end=end)
+            line = msp.add_line(start=start, end=end)
+            line.set_dxf_attrib('layer', context.layer)
 
         elif isinstance(segment, path.QuadraticBezier):
             start = _complex_to_3tuple(segment.start, context.transform)
@@ -133,6 +152,7 @@ def __append_path_to_dxf(element, msp, debug, context):
             spline = msp.add_spline()
             spline.set_control_points((start, control, control, end))
             spline.set_knot_values((0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0))
+            spline.set_dxf_attrib('layer', context.layer)
 
         elif isinstance(segment, path.CubicBezier):
             start = _complex_to_3tuple(segment.start, context.transform)
@@ -143,6 +163,7 @@ def __append_path_to_dxf(element, msp, debug, context):
             spline = msp.add_spline()
             spline.set_control_points((start, control1, control2, end))
             spline.set_knot_values((0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0))
+            spline.set_dxf_attrib('layer', context.layer)
 
         elif isinstance(segment, path.Arc):
             num_segments = int(math.ceil(math.fabs(segment.delta) / 30.0))
@@ -163,7 +184,8 @@ def __append_path_to_dxf(element, msp, debug, context):
                     fit_points[-1] = _complex_to_3tuple(segment.end, context.transform)
 
                 # msp.add_spline(fit_points=fit_points)
-                msp.add_lwpolyline(points=fit_points)  # todo use splines
+                line = msp.add_lwpolyline(points=fit_points)  # todo use splines
+                line.set_dxf_attrib('layer', context.layer)
 
         else:
             debug(segment)
@@ -171,7 +193,7 @@ def __append_path_to_dxf(element, msp, debug, context):
 
 def _append_element(element, msp, debug, context):
     if isinstance(element, structure.G):
-        _append_subelements(element, msp, debug, context.element(element))
+        _append_subelements(element, msp, debug, context)
 
     elif isinstance(element, shape.Path):
         __append_path_to_dxf(element, msp, debug, context)
@@ -209,7 +231,7 @@ def _append_element(element, msp, debug, context):
 
 def _append_subelements(element, msp, debug, context):
     for e in element.getAllElements():
-        _append_element(e, msp, debug, context)
+        _append_element(e, msp, debug, context.element(e))
 
 
 __units = {
@@ -222,67 +244,55 @@ __units = {
 }
 
 
-class StyleToLayer(object):
-    def __init__(self, dwg):
-        self.dwg = dwg
-        self.layers = {
-            'default': dwg.layers.create(name='MyLines', dxfattribs={})
-        }
-
-    def resolve_layer(self, style):
-        return self.layers['default']
-
-
 class ElementContext(object):
-    def __init__(self, transform=x.IDENTITY, styles=(), style_to_layer=None):
-        if style_to_layer is None:
-            raise Exception("style_to_layer is required")
+    def __init__(self, transform_=transform.IDENTITY, layer='default'):
+        self.transform = transform_
+        self.layer = layer
 
-        self.transform = transform
-        self.styles = styles
-        self.style_to_layer = style_to_layer
-
+    # noinspection PyProtectedMember
     def element(self, element):
-        transform = self.transform
+        transform_ = self.transform
         if hasattr(element, 'get_transform') and element.get_transform():
-            transform = transform.mult(x.parse(element.get_transform()))
+            transform_ = transform_.mult(transform.parse(element.get_transform()))
 
-        styles = self.styles
-        if hasattr(element, 'get_style') and element.get_style():
-            pass
+        layer = 'default'
+        if hasattr(element, 'getAttribute') and element.get_class():
+            classes = element.get_class().split(" ")
+            for class_ in classes:
+                if class_.startswith('dxf-layer-'):
+                    layer = class_[len('dxf-layer-'):].strip()
+                    break
 
-        return ElementContext(transform, styles, self.style_to_layer)
-
-    def resolve_style(self):
-        return 'a'
-
-    def layer(self):
-        style = self.resolve_style()
-        return self.style_to_layer.resolve_layer(style)
+        return ElementContext(transform_, layer)
 
 
-def convert(svg_in, dxf_out, debug_out=None):
+def create_layers(dwg, layer_to_style):
+    if layer_to_style is None:
+        layer_to_style = {}
+
+    if 'default' not in layer_to_style:
+        layer_to_style['default'] = {'color': '#000000'}
+
+    for name, styles in layer_to_style.items():
+        layer = dwg.layers.create(name=name, dxfattribs={})
+        if 'color' in styles:
+            layer.set_color(colortrans.rgb2short(styles['color']))
+
+
+def convert(svg_in, dxf_out, layer_to_style=None, debug_out=None):
     if debug_out is not None:
         debug = lambda *objects: print(*objects, file=debug_out)
     else:
         debug = _noop
 
-    svg = pysvg.parser.parse(svg_in)
-    dwg = ezdxf.new('AC1027')
-
-    # if "viewBox" in svg._attributes:
-    #     viewbox = [float(s) for s in svg.get_viewBox().split(" ") if s.strip()]
-    #     if len(viewbox) == 4:
-    #         dwg.header["$EXTMIN"] = (viewbox[0], viewbox[1], 0)
-    #         dwg.header["$EXTMAX"] = (viewbox[0] + viewbox[2], viewbox[1] + viewbox[3], 0)
-
-    # if "width" in svg._attributes:
-    #     pass
-    # 
-    # dwg.header['$INSUNITS'] = __units['mm']
+    with stdout_ignore():
+        svg = pysvg.parser.parse(svg_in)
+    dwg = ezdxf.new('AC1015')
+    create_layers(dwg, layer_to_style)
 
     msp = dwg.modelspace()
-    context = ElementContext(transform=x.matrix(1, 0, 0, -1, 0, 0), style_to_layer=StyleToLayer(dwg)).element(svg)
+    transform_ = transform.matrix(1, 0, 0, -1, 0, 0)
+    context = ElementContext(transform_=transform_).element(svg)
     _append_subelements(svg, msp, debug, context)
 
     dwg.write(dxf_out)

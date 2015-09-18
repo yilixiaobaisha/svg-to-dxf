@@ -17,11 +17,12 @@ class convert_svg(object):
     def POST(self):
         try:
             svg = web.data()
+            layer_to_style = dict(((layer, dict((ss.split(":") for ss in s.split(',')))) for layer, s in web.input().items()))
 
             if svg:
                 svg_in = StringIO.StringIO(svg)
                 dxf_out = StringIO.StringIO()
-                std_convert(svg_in, dxf_out, None)
+                std_convert(svg_in=svg_in, dxf_out=dxf_out, layer_to_style=layer_to_style, debug_out=None)
                 web.header("Content-Type", "application/dxf")
                 web.header("Service-Version", api_version)
                 return dxf_out.getvalue()
