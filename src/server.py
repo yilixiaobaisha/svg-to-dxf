@@ -11,13 +11,19 @@ urls = (
 
 
 class convert_svg(object):
+    def _common(self):
+        # web.header("Access-Control-Allow-Origin", "*")
+        return
+
     def GET(self):
+        self._common()
         return api_version
 
     def POST(self):
+        self._common()
         try:
             svg = web.data()
-            layer_to_style = dict(((layer, dict((ss.split(":") for ss in s.split(',')))) for layer, s in web.input().items()))
+            layer_to_style = self._parse_layer_styles()
 
             if svg:
                 svg_in = StringIO.StringIO(svg)
@@ -32,6 +38,20 @@ class convert_svg(object):
         except Exception, e:
             print(str(e), file=sys.stderr)
             return web.internalerror(str(e))
+
+    # noinspection PyMethodMayBeStatic
+    def _parse_layer_styles(self):
+        layer_to_style = {}
+        for layer, s in web.input().items():
+            layer_styles = [e.strip() for e in s.split(',') if e.strip()]
+            if layer_styles:
+                layer_to_style[layer] = {}
+                for layer_style in layer_styles:
+                    layer_style = layer_style.split(":")
+                    if len(layer_style) == 2:
+                        style, style_value = layer_style[0], layer_style[1]
+                        layer_to_style[layer][style] = style_value
+        return layer_to_style
 
 
 if __name__ == "__main__":
