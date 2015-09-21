@@ -135,8 +135,10 @@ def _point_on_arc(theta, c, r):
 
 
 def __append_path_to_dxf(element, msp, debug, context):
-    parsed = path.parser.parse_path(element.get_d())
+    if context.layer == 'ignore':
+        return
 
+    parsed = path.parser.parse_path(element.get_d())
     for segment in parsed:
         if isinstance(segment, path.Line):
             start = _complex_to_2tuple(segment.start, context.transform)
